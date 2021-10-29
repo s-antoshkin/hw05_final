@@ -11,7 +11,7 @@ from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from mixer.backend.django import mixer
 
-from ..models import Comment, Group, Post, User
+from ..models import Comment, Follow, Group, Post, User
 
 User = get_user_model()
 TEMP_MEDIA_ROOT = tempfile.mkdtemp(dir=settings.BASE_DIR)
@@ -39,6 +39,7 @@ class PostPagesTests(TestCase):
         cls.test_post.save()
 
     def setUp(self):
+        cache.clear()
         self.guest_client = Client()
         self.authorized_client_author = Client()
         self.authorized_client_author.force_login(self.test_author)
@@ -51,7 +52,6 @@ class PostPagesTests(TestCase):
 
     def test_first_page_contains_ten_records(self):
         """Количество постов на странице равно 10."""
-        cache.clear()
         reverse_names = {
             "index": reverse("posts:index"),
             "group_list": reverse(
@@ -105,7 +105,6 @@ class PostPagesTests(TestCase):
         Шаблоны index, group_list, profile
         сформированы с правильным контекстом.
         """
-        cache.clear()
         reverse_names = {
             "index": reverse("posts:index"),
             "group_list": reverse(
@@ -219,7 +218,6 @@ class PostPagesTests(TestCase):
         Пост правильно отображается на страницах
         index, profile, group_list, post_detail
         """
-        cache.clear()
         small_gif = (
             b"\x47\x49\x46\x38\x39\x61\x02\x00"
             b"\x01\x00\x80\x00\x00\x00\x00\x00"
@@ -282,36 +280,26 @@ class PostPagesTests(TestCase):
                 self.assertDictEqual(post_fields, test_post)
 
     def test_comments(self):
-        self.authorized_client_author.post(
-            reverse("posts:post_create"),
-            {"text": "for comments testing"},
-            follow=True
-        )
-        post_id = Post.objects.latest("id").id
-        response = self.authorized_client.post(
-            reverse("posts:add_comment", kwargs={"post_id": post_id}),
-            {"text": "Тестовый коммент!"},
-            follow=True,
-        )
-        # На странице после отправки появляется комментарий
-        self.assertContains(response, "Тестовый коммент!")
-        # Автор комментария - авторизованный пользователь
-        comment = Comment.objects.get(
-            post_id=post_id,
+        Comment.objects.create(
+            post=self.test_post,
+            author=self.not_guest,
             text="Тестовый коммент!"
         )
-        self.assertEqual(comment.author_id, self.not_author.id)
-        # Неавторизованный пользователь не может оставить комментарий
-        response = self.client.post(
-            reverse("posts:add_comment", kwargs={"post_id": post_id}),
-            {"text": "Комментарий от неавторизованного пользователя"},
-            follow=True,
+        response = self.authorized_client.get(
+            reverse(
+                "posts:post_detail",
+                kwargs={"post_id": self.test_post.id}
+            )
         )
-        comment_reverse = reverse(
-            "posts:add_comment",
-            kwargs={"post_id": post_id}
+        self.assertEqual(response.context["comments"].count(), 1)
+        self.assertEqual(
+            response.context["comments"][0].text,
+            "Тестовый коммент!"
         )
-        self.assertRedirects(response, f"/auth/login/?next={comment_reverse}")
+        self.assertEqual(
+            response.context["comments"][0].author,
+            self.not_guest
+        )
 
     def test_cache(self):
         post_text = "for cache testing"
@@ -342,7 +330,6 @@ class PostPagesTests(TestCase):
         Авторизованный пользователь может подписываться
         на других пользователей
         """
-        cache.clear()
         self.authorized_client.get(
             reverse(
                 "posts:profile_follow",
@@ -366,18 +353,20 @@ class PostPagesTests(TestCase):
             author=self.test_author,
             group=None
         )
-        # У подписчика появилась запись
-        self.authorized_client2.get(
-            reverse(
-                "posts:profile_follow",
-                kwargs={"username": self.test_author}
-            ),
-            follow=True,
+        Follow.objects.create(
+            user=self.not_guest,
+            author=self.test_author
         )
         response = self.authorized_client2.get(reverse("posts:follow_index"))
         self.assertContains(response, post)
         # У других не появилась
         response = self.authorized_client.get(reverse("posts:follow_index"))
+        self.assertNotContains(response, post)
+        self.not_guest.follower.filter(
+            author=self.test_author
+        ).delete()
+        # В разделе "Избранные авторы" нет постов после отписки
+        response = self.authorized_client2.get(reverse("posts:follow_index"))
         self.assertNotContains(response, post)
 
     def test_unfollow(self):
@@ -395,6 +384,3 @@ class PostPagesTests(TestCase):
         self.assertFalse(
             self.not_guest.follower.filter(author=self.test_author).exists()
         )
-        # В разделе "Избранные авторы" нет постов
-        response = self.authorized_client2.get(reverse("posts:follow_index"))
-        self.assertEqual(len(response.context["page_obj"]), 0)

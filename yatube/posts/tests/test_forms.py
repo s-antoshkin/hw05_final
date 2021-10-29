@@ -5,7 +5,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
-from ..models import Group, Post, User
+from ..models import Comment, Group, Post, User
 
 TEMP_MEDIA_ROOT = tempfile.mkdtemp(dir=settings.BASE_DIR)
 
@@ -26,6 +26,7 @@ class PostFormTests(TestCase):
         )
 
     def setUp(self):
+        self.guest_client = Client()
         self.authorized_client = Client()
         self.authorized_client.force_login(self.test_author)
 
@@ -122,3 +123,54 @@ class PostFormTests(TestCase):
         self.assertEqual(new_post.group.id, form_data["group"])
         self.assertEqual(new_post.image, "posts/small.gif")
         self.assertEqual(new_post.author, self.test_author)
+
+    def test_create_comment(self):
+        """Валидная форма создает новый Comment"""
+        comments_count = Comment.objects.count()
+        response = self.authorized_client.post(
+            reverse(
+                "posts:add_comment",
+                kwargs={"post_id": self.test_post.id}
+            ),
+            {"text": "Тестовый коммент!"},
+            follow=True,
+        )
+        self.assertEqual(
+            Comment.objects.count(),
+            comments_count + 1,
+            "Колличество комментариев не увеличилось!"
+        )
+        last_comment = Comment.objects.latest("id")
+        self.assertEqual(
+            last_comment.text,
+            "Тестовый коммент!",
+            "Текст комментария не совпадает с ожидаемым"
+        )
+        self.assertEqual(
+            last_comment.post.id,
+            self.test_post.id,
+            "Комментарий не привязан к нужному посту"
+        )
+        self.assertEqual(
+            last_comment.author,
+            self.test_author,
+            "Автор комментария не совпадает с ожидаемым"
+        )
+        response = self.guest_client.post(
+            reverse(
+                "posts:add_comment",
+                kwargs={"post_id": self.test_post.id}
+            ),
+            {"text": "Комментарий от неавторизованного пользователя"},
+            follow=True,
+        )
+        comment_reverse = reverse(
+            "posts:add_comment",
+            kwargs={"post_id": self.test_post.id}
+        )
+        self.assertRedirects(
+            response,
+            f"/auth/login/?next={comment_reverse}",
+            msg_prefix="Неавторизованного пользователя при "
+                       "комментировании не редиректит на страницу логина"
+        )

@@ -16,6 +16,7 @@ def index(request):
     page_obj = paginator.get_page(page_number)
     context = {
         "page_obj": page_obj,
+        "index": True
     }
     return render(request, "posts/index.html", context)
 
@@ -124,6 +125,7 @@ def follow_index(request):
     page_obj = paginator.get_page(page_number)
     context = {
         "page_obj": page_obj,
+        "follow": True
     }
     return render(request, "posts/follow.html", context)
 
@@ -133,12 +135,7 @@ def profile_follow(request, username):
     follower = request.user
     following = get_object_or_404(User, username=username)
     if follower != following:
-        follow = Follow.objects.filter(
-            user=follower,
-            author=following
-        ).exists()
-        if not follow:
-            Follow.objects.create(user=follower, author=following)
+        Follow.objects.get_or_create(user=follower, author=following)
     return redirect("posts:profile", username=username)
 
 
@@ -146,7 +143,5 @@ def profile_follow(request, username):
 def profile_unfollow(request, username):
     follower = request.user
     following = get_object_or_404(User, username=username)
-    follow = Follow.objects.filter(user=follower, author=following)
-    if follow.exists():
-        follow.delete()
+    follower.follower.filter(author=following).delete()
     return redirect("posts:profile", username=username)
