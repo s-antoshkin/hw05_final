@@ -1,15 +1,8 @@
 import os
 from dotenv import load_dotenv
-import sentry_sdk
-from sentry_sdk.integrations.django import DjangoIntegration
 
 
 load_dotenv()
-
-sentry_sdk.init(
-    dsn="https://cdef87636d824ffa94a9718384065283@o1177794.ingest.sentry.io/6283118",
-    integrations=[DjangoIntegration()],
-)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -25,8 +18,6 @@ ALLOWED_HOSTS = [
     "testserver",
     "rs.hopto.org",
 ]
-
-# Application definition
 
 CACHES = {
     "default": {
